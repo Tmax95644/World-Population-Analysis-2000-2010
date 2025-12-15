@@ -1,0 +1,278 @@
+### 1. Data Exploration
+
+#### Q1: How many countries are recorded per continent?
+
+```sql
+SELECT
+    c.continent,
+    COUNT(DISTINCT c.name) AS country_count
+FROM countries c
+JOIN population_years py
+    ON c.id = py.country_id
+GROUP BY c.continent
+ORDER BY country_count DESC;
+```
+
+**Result:**
+
+| Continent     | Country Count |
+| ------------- | ------------- |
+| Africa        | 56            |
+| Asia          | 51            |
+| Europe        | 40            |
+| North America | 35            |
+| Oceania       | 17            |
+| South America | 14            |
+
+---
+
+#### Q2: Average population of each continent in 2010
+
+```sql
+SELECT
+    c.continent,
+    ROUND(AVG(py.population), 2) AS avg_population_2010
+FROM countries c
+JOIN population_years py
+    ON c.id = py.country_id
+WHERE py.year = 2010
+GROUP BY c.continent
+ORDER BY avg_population_2010 DESC;
+```
+
+**Result:**
+
+| Continent     | Avg Population (2010, millions) |
+| ------------- | ------------------------------- |
+| Asia          | 81.04                           |
+| South America | 28.33                           |
+| Europe        | 18.54                           |
+| Africa        | 18.13                           |
+| North America | 15.42                           |
+| Oceania       | 2.06                            |
+
+---
+
+### 2. Top Countries by Population
+
+#### Q3: Top 10 countries by population in 2010
+
+```sql
+SELECT
+    c.name,
+    py.population
+FROM countries c
+JOIN population_years py
+    ON py.country_id = c.id
+WHERE py.year = 2010
+ORDER BY py.population DESC
+LIMIT 10;
+```
+
+**Result:**
+
+| Country       | Population (millions) |
+| ------------- | --------------------- |
+| China         | 1330.14               |
+| India         | 1173.11               |
+| United States | 310.23                |
+| Indonesia     | 242.97                |
+| Brazil        | 201.10                |
+| Pakistan      | 184.40                |
+| Bangladesh    | 156.12                |
+| Nigeria       | 152.22                |
+| Russia        | 139.39                |
+| Japan         | 126.80                |
+
+---
+
+### 3. Population Growth Trends
+
+#### Q4: Dataset year range
+
+```sql
+SELECT DISTINCT year
+FROM population_years;
+```
+
+**Years covered:** 2000–2010
+
+---
+
+#### Q5: Largest population by year
+
+```sql
+SELECT
+    py.year,
+    c.name,
+    py.population
+FROM population_years py
+JOIN countries c
+    ON c.id = py.country_id
+WHERE (py.year, py.population) IN (
+    SELECT year, MAX(population)
+    FROM population_years
+    GROUP BY year
+)
+ORDER BY py.year DESC;
+```
+
+**Insight:** China consistently has the largest population across all years in the dataset.
+
+---
+
+#### Q6: Percentage population growth by continent (2000–2010)
+
+```sql
+SELECT
+    c.continent,
+    (SUM(CASE WHEN py.year = 2010 THEN py.population END) -
+     SUM(CASE WHEN py.year = 2000 THEN py.population END)) * 100.0 /
+     SUM(CASE WHEN py.year = 2000 THEN py.population END)
+     AS population_growth_percentage
+FROM population_years py
+JOIN countries c
+    ON c.id = py.country_id
+WHERE py.year IN (2000, 2010)
+GROUP BY c.continent
+ORDER BY population_growth_percentage DESC;
+```
+
+**Result:**
+
+| Continent     | Growth (%) |
+| ------------- | ---------- |
+| Africa        | 26.36      |
+| Oceania       | 14.95      |
+| South America | 13.93      |
+| Asia          | 11.98      |
+| North America | 10.96      |
+| Europe        | -0.81      |
+
+---
+
+### 4. Extremes in Population Change
+
+#### Smallest population change (2000–2010)
+
+```sql
+SELECT
+    c.name,
+    ROUND(SUM(CASE WHEN py.year = 2000 THEN py.population END), 2) AS pop_2000,
+    ROUND(SUM(CASE WHEN py.year = 2010 THEN py.population END), 2) AS pop_2010,
+    ROUND(
+        SUM(CASE WHEN py.year = 2010 THEN py.population END) -
+        SUM(CASE WHEN py.year = 2000 THEN py.population END), 2
+    ) AS population_increase,
+    ROUND(
+        (
+            SUM(CASE WHEN py.year = 2010 THEN py.population END) -
+            SUM(CASE WHEN py.year = 2000 THEN py.population END)
+        ) * 100.0 /
+        SUM(CASE WHEN py.year = 2000 THEN py.population END), 2
+    ) AS percent_growth
+FROM countries c
+JOIN population_years py
+    ON c.id = py.country_id
+WHERE py.year IN (2000, 2010)
+GROUP BY c.name
+ORDER BY percent_growth ASC
+LIMIT 10;
+```
+
+**Example Result:**
+
+| Country      | pop_2000 | pop_2010 | Change | Growth (%) |
+| ------------ | -------- | -------- | ------ | ---------- |
+| Cook Islands | 0.02     | 0.01     | -0.01  | -29.55     |
+| Bulgaria     | 7.82     | 7.15     | -0.67  | -8.57      |
+| Ukraine      | 49.01    | 45.42    | -3.59  | -7.32      |
+
+---
+
+#### Highest single-year percentage growth
+
+```sql
+SELECT
+    c.name,
+    py.year,
+    py.population,
+    LAG(py.population) OVER (PARTITION BY c.id ORDER BY py.year) AS prev_population,
+    ROUND(
+        ((py.population - LAG(py.population) OVER (PARTITION BY c.id ORDER BY py.year)) * 100.0) /
+        LAG(py.population) OVER (PARTITION BY c.id ORDER BY py.year), 2
+    ) AS growth_percentage
+FROM population_years py
+JOIN countries c
+    ON c.id = py.country_id
+ORDER BY growth_percentage DESC
+LIMIT 1;
+```
+
+**Result:** Montserrat recorded the highest single-year growth at **13.44% in 2002**.
+
+---
+
+### 5. Country Ranking by Continent (2010)
+
+```sql
+SELECT
+    continent,
+    name,
+    population
+FROM (
+    SELECT
+        c.continent,
+        c.name,
+        py.population,
+        RANK() OVER (PARTITION BY c.continent ORDER BY py.population DESC) AS rank
+    FROM countries c
+    JOIN population_years py
+        ON c.id = py.country_id
+    WHERE py.year = 2010
+) ranked
+WHERE rank <= 3
+ORDER BY continent, rank;
+```
+
+**Example Result:**
+
+| Continent | Country   | Population (millions) |
+| --------- | --------- | --------------------- |
+| Africa    | Nigeria   | 152.22                |
+| Africa    | Ethiopia  | 88.01                 |
+| Africa    | Egypt     | 80.47                 |
+| Asia      | China     | 1330.14               |
+| Asia      | India     | 1173.11               |
+| Asia      | Indonesia | 242.97                |
+
+---
+
+### 6. Global Population Over Time
+
+This query aggregates population across all countries by year, enabling visualisation of long-term global growth trends.
+
+```sql
+SELECT
+    year,
+    SUM(population) AS total_population
+FROM population_years
+GROUP BY year
+ORDER BY year;
+```
+
+**Result:**
+
+| Year | Total Population (millions) |
+| ---- | --------------------------- |
+| 2000 | 6088.47                     |
+| 2001 | 6165.11                     |
+| 2002 | 6241.50                     |
+| 2003 | 6317.21                     |
+| 2004 | 6392.90                     |
+| 2005 | 6468.91                     |
+| 2006 | 6535.72                     |
+| 2007 | 6613.43                     |
+| 2008 | 6690.65                     |
+| 2009 | 6766.83                     |
+| 2010 | 6842.96                     |
